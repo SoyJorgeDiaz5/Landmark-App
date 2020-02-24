@@ -1,7 +1,7 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 
 buildscript {
-    ext.awsVersion = '2.7.+'
+    ext.awsVersion = '2.8.2'
     repositories {
         google()
         jcenter()

@@ -14,12 +14,15 @@ import android.location.Location;
 import android.os.Bundle;
 import android.text.InputType;
 import android.util.Log;
+import android.view.View;
 import android.widget.EditText;
 import android.widget.Toast;
 
 import com.amazonaws.amplify.generated.graphql.CreateUserLandmarkMutation;
+import com.amazonaws.amplify.generated.graphql.ListUserLandmarksQuery;
 import com.amazonaws.mobile.config.AWSConfiguration;
 import com.amazonaws.mobileconnectors.appsync.AWSAppSyncClient;
+import com.amazonaws.mobileconnectors.appsync.fetcher.AppSyncResponseFetchers;
 import com.apollographql.apollo.GraphQLCall;
 import com.apollographql.apollo.api.Response;
 import com.apollographql.apollo.exception.ApolloException;
@@ -31,17 +34,22 @@ import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
+import com.google.android.gms.maps.model.CameraPosition;
 import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.LatLngBounds;
 import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
 
+import java.util.List;
 import java.util.UUID;
 
 import javax.annotation.Nonnull;
 
 import type.CreateUserLandmarkInput;
+import type.TableStringFilterInput;
+import type.TableUserLandmarkFilterInput;
 
 public class MainActivity extends AppCompatActivity implements OnMapReadyCallback, GoogleMap.OnMapLongClickListener {
 
@@ -186,7 +194,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                Toast.makeText(getApplicationContext(), message, Toast.LENGTH_SHORT).show();
+                Toast.makeText(getApplicationContext(), message, Toast.LENGTH_LONG).show();
             }
         });
     }
@@ -216,5 +224,77 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             }
         });
         builder.show();
+    }
+
+    public void onMapSearch(View v){
+        EditText searchInput = findViewById(R.id.editText_search);
+        query(searchInput.getText().toString());
+    }
+
+    private void query(String comment) {
+        if (comment.isEmpty()){
+            show("Please fill in your search query.");
+            return;
+        }
+        TableUserLandmarkFilterInput filterInput = TableUserLandmarkFilterInput.builder()
+                .note(TableStringFilterInput.builder().contains(comment).build())
+                .build();
+        mAWSAppSyncClient.query(ListUserLandmarksQuery.builder().filter(filterInput).build())
+                .responseFetcher(AppSyncResponseFetchers.NETWORK_FIRST)
+                .enqueue(queryCallback);
+    }
+
+    private GraphQLCall.Callback<ListUserLandmarksQuery.Data> queryCallback
+            = new GraphQLCall.Callback<ListUserLandmarksQuery.Data>() {
+        @Override
+        public void onResponse(@Nonnull Response<ListUserLandmarksQuery.Data> response) {
+            clearMarker();
+            if (!response.data().listUserLandmarks().items().isEmpty()){
+                for (ListUserLandmarksQuery.Item i: response.data().listUserLandmarks().items()){
+                    addMarker(new LatLng(i.lat(), i.lng()), i.user(), i.note());
+                }
+                moveToMarkerCenter(response.data().listUserLandmarks().items());
+            }
+        }
+
+        @Override
+        public void onFailure(@Nonnull ApolloException e) {
+            show(e.getMessage());
+        }
+    };
+
+    private void moveToMarkerCenter(final List<ListUserLandmarksQuery.Item> items) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (items.size() > 1){
+                    // Move camera view to center of the bounds
+                    LatLngBounds.Builder builder = new LatLngBounds.Builder();
+                    for (ListUserLandmarksQuery.Item item : items){
+                        builder.include(new LatLng(item.lat(), item.lng()));
+                    }
+                    LatLngBounds bounds = builder.build();
+                    mMap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 100));
+                } else if(items.size() == 1){
+                    // Move camera to the particular landmark
+                    final CameraPosition cameraPosition = new CameraPosition.Builder()
+                            .target(new LatLng(items.get(0).lat(), items.get(0).lng()))
+                            .zoom(15)
+                            .bearing(0)
+                            .tilt(0)
+                            .build();
+                    mMap.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition));
+                }
+            }
+        });
+    }
+
+    private void clearMarker() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mMap.clear();
+            }
+        });
     }
 }
